@@ -1,3 +1,7 @@
+/*
+ * 寻页机制是如何完成的
+ * 手动MMU寻页的过程
+ */
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/mm.h>
@@ -9,6 +13,7 @@
 static unsigned long cr0, cr3;
 static unsigned long vaddr = 0;
 
+// 打印页寄存器的一些参数
 static void get_pgtable_macro(void)
 {
 	cr0 = read_cr0();
@@ -17,7 +22,7 @@ static void get_pgtable_macro(void)
 	printk("cr0 = 0x%lx, cr3 = 0x%lx\n",cr0,cr3);
     
     printk("PGDIR_SHIFT = %d\n", PGDIR_SHIFT);
-    printk("P4D_SHIFT = %d\n",P4D_SHIFT);
+    printk("P4D_SHIFT = %d\n", P4D_SHIFT);
     printk("PUD_SHIFT = %d\n", PUD_SHIFT);
     printk("PMD_SHIFT = %d\n", PMD_SHIFT);
     printk("PAGE_SHIFT = %d\n", PAGE_SHIFT);
@@ -30,6 +35,7 @@ static void get_pgtable_macro(void)
     printk("PAGE_MASK = 0x%lx\n", PAGE_MASK);
 }
 
+// 线性地址到物理地址的转换
 static unsigned long vaddr2paddr(unsigned long vaddr)
 {
     pgd_t *pgd;
@@ -47,7 +53,7 @@ static unsigned long vaddr2paddr(unsigned long vaddr)
         return -1;
     }
 
-    p4d = p4d_offset(pgd, vaddr);
+    p4d = p4d_offset(pgd, vaddr); // 页目录项
     printk("p4d_val = 0x%lx, p4d_index = %lu\n", p4d_val(*p4d),p4d_index(vaddr));
     if(p4d_none(*p4d))
     { 
