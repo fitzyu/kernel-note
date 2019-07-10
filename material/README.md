@@ -1,5 +1,6 @@
-# kernel-note
-Linux内核机制笔记
+# 推荐书籍
+《深入理解Linux内核》
+《Linux内核深度解析》 余华兵
 
 # linux内核源码查看网站
 https://elixir.bootlin.com
@@ -13,3 +14,6 @@ https://www.youtube.com/channel/UCfX55Sx5hEFjoC3cNs6mCUQ
 https://www.youtube.com/channel/UCzv1VG_o1MoQCA1G0uixMaA
 https://www.youtube.com/channel/UCENfkXFKg3FSeaWe400WdtA
 https://www.youtube.com/watch?v=YY1wOUdIwWU&list=PLS0SUwlYe8cxMiFW_PiaBu53nOAXl3dxS&index=1（计算机等结构）
+
+# 国内网站
+哈工大的视频 https://study.163.com/series/1202806603.htm
