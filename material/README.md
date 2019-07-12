@@ -1,6 +1,9 @@
 # 推荐书籍
 《深入理解Linux内核》
 《Linux内核深度解析》 余华兵
+《Unix编程艺术》
+《代码大全》
+《深入Linux设备驱动程序内核机制》陈学松
 
 # linux内核源码查看网站
 https://elixir.bootlin.com
