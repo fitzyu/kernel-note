@@ -1,0 +1,199 @@
+/*
+ * è¿è¡ŒAPP æµ‹è¯•é©±åŠ¨ 
+ */
+#include <linux/module.h>
+#include <linux/fs.h>
+#include <linux/device.h>
+#include <linux/interrupt.h>
+#include <linux/gpio.h>
+#include <linux/wait.h>
+#include <linux/sched.h>
+#include <linux/poll.h>
+#include <asm/uaccess.h>
+#include <asm/io.h>
+#include <mach/gpio.h>
+
+#define DEVICE_NAME "fitz_button"
+static int major;
+
+volatile unsigned long *gpx3con = NULL;
+volatile unsigned long *gpx3dat = NULL;
+
+static DEFINE_SEMAPHORE(button_lock); // ¶¨Òå»¥³âÁ¿
+static struct class *button_class;
+static struct device *button_class_dev;
+static unsigned char key_val;
+static struct fasync_struct *button_async;
+static DECLARE_WAIT_QUEUE_HEAD(button_waitq);
+// ä¸­æ–­æ—¶é—´æ ‡å¿—ï¼Œä¸­æ–­æœåŠ¡ç¨‹åºå°†å®ƒç½®1ï¼Œreadå‡½æ•°å°†å®ƒæ¸…0
+static volatile int ev_press = 0;
+
+struct pin_desc {
+	unsigned int pin;
+	unsigned int keyValue;
+};
+
+/*
+ * æŒ‰ä¸‹æ—¶ 0x1 0x2 0x3 0x4
+ * æ¾å¼€æ—¶ 0x81 0x82 0x83 0x84
+ */
+struct pin_desc pins_desc[4] = {
+	{EXYNOS4_GPX3(2), 0x01},
+	{EXYNOS4_GPX3(3), 0x02},
+	{EXYNOS4_GPX3(4), 0x03},
+	{EXYNOS4_GPX3(5), 0x04},
+};
+
+static irqreturn_t button_irq(int irq, void *dev_id)
+{
+	struct pin_desc *pinDesc = (struct pin_desc *)dev_id;
+	printk("irq = %d\n", irq);
+
+	int pinValue = gpio_get_value(pinDesc->pin);
+	if (pinValue) { // æ¾å¼€
+		key_val = 0x80 | pinDesc->keyValue;
+	} else { // æŒ‰ä¸‹
+		key_val = pinDesc->keyValue;
+	}
+
+	ev_press = 1; // è¡¨ç¤ºä¸­æ–­å‘ç”Ÿäº†
+	wake_up_interruptible(&button_waitq); // å”¤é†’ä¼‘çœ çš„è¿›ç¨‹
+	kill_fasync(&button_async, SIGIO ,POLL_IN); // POLL_INæœ‰æ•°æ®ç­‰å¾…è¯»å–
+	return IRQ_RETVAL(IRQ_HANDLED);
+}
+
+static int button_drv_open(struct inode *inode, struct file *file)
+{
+	int irq;
+	int ret;
+
+	if (file->f_flags & O_NONBLOCK) { // ·Ç×èÈû²Ù×÷
+		if (down_trylock(&button_lock))
+			return -EBUSY;
+	} else { // ×èÈû²Ù×÷
+		/* »ñÈ¡ĞÅºÅÁ¿ */
+		down(&button_lock);
+	}
+	
+
+	// IRQT_BOTHEDGE
+	irq = gpio_to_irq(EXYNOS4_GPX3(2));
+	ret = request_irq(irq, button_irq, IRQF_SHARED, "S2", (void *)&pins_desc[0]);
+	if (ret < 0) {
+		return ret;
+	}
+
+	irq = gpio_to_irq(EXYNOS4_GPX3(3));
+	ret = request_irq(irq, button_irq, IRQF_SHARED, "S3", (void *)&pins_desc[1]);
+	if (ret < 0) {
+		return ret;
+	}
+	irq = gpio_to_irq(EXYNOS4_GPX3(4));
+	ret = request_irq(irq, button_irq, IRQF_SHARED, "S4", (void *)&pins_desc[2]);
+	if (ret < 0) {
+		return ret;
+	}
+
+	irq = gpio_to_irq(EXYNOS4_GPX3(5));
+	ret = request_irq(irq, button_irq, IRQF_SHARED, "S5", (void *)&pins_desc[3]);
+	if (ret < 0) {
+		return ret;
+	}
+
+	return 0;
+}
+
+static ssize_t button_drv_read(struct file *file, char __user *buf, size_t size, loff_t *loff)
+{
+	if (file->f_flags & O_NONBLOCK) { // ·Ç×èÈû²Ù×÷
+		if (!ev_press)
+			return -EAGAIN;
+	} else { // ×èÈû²Ù×÷
+		// å¦‚æœæ²¡æœ‰æŒ‰é”®åŠ¨ä½œå‘ç”Ÿï¼Œå°±ä¼‘çœ 
+		wait_event_interruptible(button_waitq, ev_press);
+	}
+	
+	
+	// å¦‚æœæœ‰æŒ‰é”®åŠ¨ä½œ,è¿”å›é”®å€¼
+	copy_to_user(buf, &key_val, 1);
+	ev_press = 0;
+	return 0;
+}
+
+static int button_drv_release(struct inode *node, struct file *file)
+{
+	int irq;
+
+	irq = gpio_to_irq(EXYNOS4_GPX3(2));
+	free_irq(irq, (void *)&pins_desc[0]);
+	irq = gpio_to_irq(EXYNOS4_GPX3(3));
+	free_irq(irq, (void *)&pins_desc[1]);
+	irq = gpio_to_irq(EXYNOS4_GPX3(4));
+	free_irq(irq, (void *)&pins_desc[2]);
+	irq = gpio_to_irq(EXYNOS4_GPX3(5));
+	free_irq(irq, (void *)&pins_desc[3]);
+
+	up(&button_lock);
+	return 0;
+}
+
+unsigned int button_drv_poll(struct file *file, struct poll_table_struct *wait)
+{
+	unsigned int mask = 0;
+
+	poll_wait(file, &button_waitq, wait); // ä¸ä¼šç«‹å³ä¼‘çœ 
+
+	if (ev_press)
+		mask |= POLLIN | POLLRDNORM;
+
+	return mask;
+}
+
+static int button_fasync(int fd, struct file *file, int on)
+{
+	printk("button_fasync\n");
+	return fasync_helper(fd, file, on, &button_async);
+}
+
+struct file_operations button_fops = {
+	.owner = THIS_MODULE,
+	.open = button_drv_open,
+	.read = button_drv_read,
+	.release = button_drv_release,
+	.poll = button_drv_poll,
+	.fasync = button_fasync
+};
+
+static int __init button_drv_init(void)
+{
+	major = register_chrdev(0, DEVICE_NAME, &button_fops);
+
+	button_class = class_create(THIS_MODULE, "fitz_drv");
+	if (IS_ERR(button_class))
+		return PTR_ERR(button_class);
+
+	button_class_dev = device_create(button_class, NULL, MKDEV(major, 0), NULL, "fitz_button");
+	if (unlikely(IS_ERR(button_class_dev)))
+		return PTR_ERR(button_class_dev);
+
+	gpx3con = (unsigned long *)ioremap(0x11000C60, 8);
+	gpx3dat = gpx3con + 1;
+
+	return 0;
+}
+
+static void __exit button_drv_exit(void)
+{
+	iounmap(gpx3con);
+	device_destroy(button_class, MKDEV(major, 0));
+	class_destroy(button_class);
+
+	unregister_chrdev(major, DEVICE_NAME);
+}
+
+module_init(button_drv_init);
+module_exit(button_drv_exit);
+
+MODULE_LICENSE("GPL");
+
+
